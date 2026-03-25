@@ -7,6 +7,7 @@ test('runtime room tokens carry the claims expected by the room websocket', asyn
   process.env.BACKEND_JWT_SECRET = 'test-secret'
   process.env.JWT_ISSUER = 'inkwell.test'
   const { verifyRuntimeRoomToken } = await import('../../inkwell-api-backend/src/runtime-rooms/runtime-room-auth.js')
+  const issuedAtMs = Date.now()
 
   const token = signRuntimeRoomToken({
     roomId: 'runtime-123',
@@ -17,7 +18,7 @@ test('runtime room tokens carry the claims expected by the room websocket', asyn
     clientInstanceId: 'cli-123',
     issuer: 'inkwell.test',
     secret: 'test-secret',
-    now: () => Date.UTC(2026, 2, 25, 0, 0, 0),
+    now: () => issuedAtMs,
   })
 
   const decoded = decodeJwt(token)
