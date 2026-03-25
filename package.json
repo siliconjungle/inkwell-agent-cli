@@ -1,0 +1,17 @@
+{
+  "name": "inkwell-api-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "inkwell-api-cli": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2",
+    "ws": "^8.18.0"
+  }
+}
