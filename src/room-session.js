@@ -3,8 +3,9 @@ import readline from 'node:readline'
 
 import WebSocket from 'ws'
 
-import { resolveRuntimeWsUrl } from './api-client.js'
+import { fetchRuntimePublishedWorld, resolveRuntimeWsUrl } from './api-client.js'
 import { normalizeString, resolveClientInstanceId } from './env.js'
+import { buildInitialHeadlessPlayState, mergeHeadlessPlayState } from './headless-play-state.js'
 import { createRoomState, applyRoomMessage, getChatHistory, getPresenceList, roomStateToJson } from './room-state.js'
 import { signRuntimeRoomToken } from './runtime-auth.js'
 
@@ -51,6 +52,7 @@ export class RoomSession {
     stderr = process.stderr,
     logEvents = true,
     openSocket = (url) => new WebSocket(url),
+    fetchRoomWorld = fetchRuntimePublishedWorld,
   } = {}) {
     this.config = config
     this.roomId = normalizeString(roomId, { max: 160 })
@@ -58,12 +60,18 @@ export class RoomSession {
     this.stderr = stderr
     this.logEvents = logEvents
     this.openSocket = openSocket
+    this.fetchRoomWorld = typeof fetchRoomWorld === 'function' ? fetchRoomWorld : null
     this.state = createRoomState()
     this.socket = null
     this.readline = null
     this.connected = false
     this.closed = false
     this.clientInstanceId = ''
+    this.roomToken = ''
+    this.headlessPlayState = null
+    this.worldData = null
+    this.worldDataLoadedAt = ''
+    this.worldDataError = ''
   }
 
   write(line = '') {
@@ -87,10 +95,93 @@ export class RoomSession {
     return this.getSelfPresence()?.hasEntered === true
   }
 
+  getSelfPlayState() {
+    const selfUserId = this.state.self?.userId || ''
+    if (!selfUserId) return null
+    return this.state.playStatesByUserId.get(selfUserId) || null
+  }
+
+  getWorldPayload() {
+    const item = this.worldData && typeof this.worldData === 'object'
+      ? this.worldData
+      : null
+    if (!item) return null
+    return item.world && typeof item.world === 'object'
+      ? item.world
+      : item
+  }
+
+  async hydrateWorldData() {
+    if (!this.fetchRoomWorld) return null
+    if (this.worldData) return this.worldData
+
+    const publishedWorldId = normalizeString(this.state.room?.publishedWorldId, { max: 64 })
+    if (!publishedWorldId || !this.roomToken) return null
+
+    const item = await this.fetchRoomWorld(this.config, {
+      roomId: this.roomId,
+      roomToken: this.roomToken,
+      publishedWorldId,
+    })
+    if (!item || typeof item !== 'object') return null
+
+    this.worldData = item
+    this.worldDataLoadedAt = new Date().toISOString()
+    this.worldDataError = ''
+    return item
+  }
+
+  resolveHeadlessPlayState(nextState = null) {
+    if (nextState && typeof nextState === 'object') {
+      this.headlessPlayState = mergeHeadlessPlayState(this.headlessPlayState, nextState)
+      return this.headlessPlayState
+    }
+    if (this.headlessPlayState) return this.headlessPlayState
+
+    const resolved = buildInitialHeadlessPlayState({
+      currentUserId: this.state.self?.userId || this.config.identity.userId,
+      playStates: Array.from(this.state.playStatesByUserId.values()),
+      worldPayload: this.getWorldPayload(),
+    })
+    this.headlessPlayState = resolved
+    return this.headlessPlayState
+  }
+
+  sendHeadlessPlayState(nextState = null, { force = false } = {}) {
+    const resolvedState = this.resolveHeadlessPlayState(nextState)
+    if (!resolvedState) return false
+    if (!force) {
+      const currentState = this.getSelfPlayState()
+      const nextSignature = JSON.stringify(resolvedState)
+      const currentSignature = currentState ? JSON.stringify({
+        x: currentState.x,
+        y: currentState.y,
+        z: currentState.z,
+        altitude: currentState.altitude,
+        verticalVel: currentState.verticalVel,
+        vx: currentState.vx,
+        vy: currentState.vy,
+        moveSpeed: currentState.moveSpeed,
+        jumpStrength: currentState.jumpStrength,
+        supportZ: currentState.supportZ,
+        facing: currentState.facing,
+        isJumping: currentState.isJumping === true,
+      }) : ''
+      if (currentSignature && currentSignature === nextSignature) return false
+    }
+
+    this.send({
+      type: 'play.state',
+      state: resolvedState,
+    })
+    return true
+  }
+
   async connect({
     selectionId = '',
     clientInstanceId = '',
     enter = false,
+    state = null,
   } = {}) {
     if (!this.roomId) throw new Error('room id is required')
     this.clientInstanceId = normalizeString(clientInstanceId, { max: 120 })
@@ -105,9 +196,14 @@ export class RoomSession {
       issuer: this.config.jwtIssuer,
       secret: this.config.backendJwtSecret,
     })
+    this.roomToken = token
     const websocketUrl = resolveRuntimeWsUrl(this.config.wsBase, this.roomId, token)
     const pendingSelection = buildSelectionPayload(selectionId, this.config.identity)
     const shouldEnter = enter === true
+    this.headlessPlayState = mergeHeadlessPlayState(null, state)
+    this.worldData = null
+    this.worldDataLoadedAt = ''
+    this.worldDataError = ''
 
     await new Promise((resolve, reject) => {
       let settled = false
@@ -134,8 +230,16 @@ export class RoomSession {
         const message = parseIncomingMessage(buffer)
         if (!message) return
         applyRoomMessage(this.state, message)
-        this.handleMessage(message)
         if (message.type === 'room.snapshot') {
+          try {
+            await this.hydrateWorldData()
+          } catch (error) {
+            this.worldDataError = error?.message || 'Failed to load room world data.'
+            if (this.logEvents) {
+              this.writeError(`[${formatTimestamp()}] world load warning: ${this.worldDataError}`)
+            }
+          }
+          this.handleMessage(message)
           if (pendingSelection) {
             this.send({
               type: 'play.selection',
@@ -143,12 +247,12 @@ export class RoomSession {
             })
           }
           if (shouldEnter) {
-            this.send({
-              type: 'play.enter',
-            })
+            this.sendEnter({ publishState: true, forceState: true })
           }
           settleResolve()
+          return
         }
+        this.handleMessage(message)
         if (message.type === 'connection.rejected') {
           settleReject(new Error(message.reason || 'connection rejected'))
         }
@@ -180,7 +284,12 @@ export class RoomSession {
       const roomName = normalizeString(this.state.room?.worldName, { max: 160 }) || 'Untitled world'
       const members = getPresenceList(this.state).length
       const chat = getChatHistory(this.state).length
-      this.write(`[${formatTimestamp()}] room snapshot: ${roomName} | ${members} online | ${chat} chat messages`)
+      const worldPayload = this.getWorldPayload()
+      const nodeCount = Array.isArray(worldPayload?.scene?.nodes) ? worldPayload.scene.nodes.length : 0
+      const worldSuffix = this.worldDataLoadedAt
+        ? ` | world loaded (${nodeCount} nodes)`
+        : ''
+      this.write(`[${formatTimestamp()}] room snapshot: ${roomName} | ${members} online | ${chat} chat messages${worldSuffix}`)
       return
     }
     if (message.type === 'presence.joined') {
@@ -219,6 +328,13 @@ export class RoomSession {
     }
     if (message.type === 'room.restart') {
       this.write(`[${formatTimestamp(message.requestedAt)}] room restart: ${message.reason || 'host-restarted'}`)
+      if (this.isEntered()) {
+        queueMicrotask(() => {
+          try {
+            this.sendHeadlessPlayState(null, { force: true })
+          } catch {}
+        })
+      }
       return
     }
     if (message.type === 'room.closed') {
@@ -255,10 +371,13 @@ export class RoomSession {
     })
   }
 
-  sendEnter() {
+  sendEnter({ publishState = true, forceState = false } = {}) {
     this.send({
       type: 'play.enter',
     })
+    if (publishState) {
+      this.sendHeadlessPlayState(null, { force: forceState })
+    }
   }
 
   sendExit() {
@@ -349,6 +468,7 @@ export class RoomSession {
         '- /presence',
         '- /history [limit]',
         '- /select <world-default|profile-avatar>',
+        '- /state <x> <y> [facing]',
         '- /snapshot',
         '- /ping',
         '- /quit',
@@ -360,7 +480,7 @@ export class RoomSession {
       return true
     }
     if (line === '/enter') {
-      this.sendEnter()
+      this.sendEnter({ publishState: true, forceState: true })
       return true
     }
     if (line === '/exit') {
@@ -375,6 +495,20 @@ export class RoomSession {
     }
     if (line.startsWith('/select ')) {
       this.sendSelection(line.slice('/select '.length))
+      return true
+    }
+    if (line.startsWith('/state ')) {
+      const [, rawX = '', rawY = '', rawFacing = ''] = line.split(/\s+/u)
+      const x = Number(rawX)
+      const y = Number(rawY)
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        throw new Error('Usage: /state <x> <y> [facing]')
+      }
+      this.sendHeadlessPlayState({
+        x,
+        y,
+        facing: rawFacing || undefined,
+      }, { force: true })
       return true
     }
     if (line === '/snapshot') {

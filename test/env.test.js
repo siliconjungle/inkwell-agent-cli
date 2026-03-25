@@ -44,3 +44,21 @@ test('loadCliConfig merges sibling env files and keeps shell overrides last', ()
   assert.equal(config.identity.email, 'shell@example.test')
   assert.equal(config.loadedFiles.length, 3)
 })
+
+test('loadCliConfig defaults the AI dev identity to the real inkwell account', () => {
+  const root = mkdtempSync(resolvePath(tmpdir(), 'inkwell-api-cli-env-defaults-'))
+  const projectDir = resolvePath(root, 'inkwell-api-cli')
+  const backendDir = resolvePath(root, 'inkwell-api-backend')
+  const frontendDir = resolvePath(root, 'inkwell-api-frontend')
+  mkdirSync(projectDir, { recursive: true })
+  mkdirSync(backendDir, { recursive: true })
+  mkdirSync(frontendDir, { recursive: true })
+
+  const config = loadCliConfig({
+    projectDir,
+    env: {},
+  })
+
+  assert.equal(config.identity.userId, 'aeee5d67-e9c5-4540-a1d6-8c021c445e1b')
+  assert.equal(config.identity.username, 'inkwell')
+})

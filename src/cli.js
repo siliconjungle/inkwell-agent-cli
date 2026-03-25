@@ -103,7 +103,7 @@ function printHelp() {
     '  --user-id <id> --username <name> --email <email> --role <role>',
     '',
     'Connection overrides:',
-    '  --api-base <url> --ws-base <url> --bearer <token> --jwt-secret <secret> --jwt-issuer <issuer>',
+    '  --api-base <url> --app-base <url> --ws-base <url> --bearer <token> --jwt-secret <secret> --jwt-issuer <issuer>',
   ].join('\n') + '\n')
 }
 
@@ -112,6 +112,7 @@ function buildConfig(options) {
     projectDir: process.cwd(),
     overrides: {
       apiBase: getOption(options, 'api-base'),
+      appBase: getOption(options, 'app-base'),
       wsBase: getOption(options, 'ws-base'),
       bearerToken: getOption(options, 'bearer'),
       backendJwtSecret: getOption(options, 'jwt-secret'),

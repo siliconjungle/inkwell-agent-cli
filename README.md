@@ -8,6 +8,8 @@ Standalone terminal CLI for local Inkwell API work, including runtime room webso
 - Signs runtime-room websocket tokens locally with `BACKEND_JWT_SECRET`.
 - Keeps a persistent room websocket open for interactive use.
 - Supports headless room entry without booting the browser runtime.
+- Downloads the same published world JSON the room browser client loads via the room-token runtime proxy.
+- Publishes a lightweight idle `play.state` for headless room entry so multiplayer ghost players render without a browser runtime.
 - Shows room presence and chat history from the live `room.snapshot`.
 - Sends room chat messages and character-selection updates.
 - Sets or clears the current account avatar by character/entity id.
@@ -17,7 +19,7 @@ Standalone terminal CLI for local Inkwell API work, including runtime room webso
 When the local backend is running in AI-dev mode, the CLI defaults to the same injected identity:
 
 - `INKWELL_AI_DEV_USERNAME=inkwell`
-- `INKWELL_AI_DEV_USER_ID=ai-dev-user`
+- `INKWELL_AI_DEV_USER_ID=aeee5d67-e9c5-4540-a1d6-8c021c445e1b`
 - `INKWELL_AI_DEV_EMAIL=ai-dev@localhost`
 - `INKWELL_AI_DEV_ROLE=admin`
 
@@ -40,6 +42,7 @@ Important variables:
 - `BACKEND_JWT_SECRET`
 - `JWT_ISSUER`
 - `NEXT_PUBLIC_API_BASE` or `INKWELL_API_BASE`
+- `INKWELL_RUNTIME_PUBLIC_BASE_URL` for the frontend runtime proxy base (defaults to `http://localhost:3000`)
 - `INKWELL_API_BEARER_TOKEN` for non-AI-dev HTTP calls
 
 ## Usage
@@ -85,6 +88,9 @@ Once connected, plain text sends chat only after you enter the room. Slash comma
 - `/history [limit]`
 - `/select world-default`
 - `/select profile-avatar`
+- `/state <x> <y> [facing]`
 - `/snapshot`
 - `/ping`
 - `/quit`
+
+When a room session connects, the CLI now also downloads the full published world JSON through the frontend runtime proxy using the same room token the browser client uses. Headless enter uses that world payload to find the authored player character and publishes the first idle `play.state` from that exact spawn point. If the world payload cannot be loaded or has no player character, the CLI falls back to the nearby-player heuristic and then `0,0`.

@@ -3,8 +3,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
 
 const DEFAULT_API_BASE = 'http://localhost:4000'
+const DEFAULT_APP_BASE = 'http://localhost:3000'
 const DEFAULT_JWT_ISSUER = 'inkwell.app'
 const DEFAULT_RUNTIME_ROOM_AUDIENCE = 'inkwell-runtime-room'
+const DEFAULT_AI_DEV_USER_ID = 'aeee5d67-e9c5-4540-a1d6-8c021c445e1b'
+const DEFAULT_AI_DEV_USERNAME = 'inkwell'
 
 export function normalizeString(value, { max = 512 } = {}) {
   if (typeof value !== 'string') return ''
@@ -134,6 +137,14 @@ export function loadCliConfig({
     || apiBase,
     apiBase,
   )
+  const appBase = normalizeBaseUrl(
+    overrides.appBase
+    || merged.INKWELL_RUNTIME_PUBLIC_BASE_URL
+    || merged.NEXT_PUBLIC_INKWELL_RUNTIME_PUBLIC_BASE_URL
+    || merged.NEXT_PUBLIC_APP_BASE
+    || DEFAULT_APP_BASE,
+    DEFAULT_APP_BASE,
+  )
   const stateDir = resolvePath(
     normalizeString(overrides.stateDir || merged.INKWELL_API_CLI_STATE_DIR, { max: 4096 })
       || resolvePath(resolvedProjectDir, '.local'),
@@ -145,13 +156,14 @@ export function loadCliConfig({
     rawEnv: merged,
     apiBase,
     wsBase,
+    appBase,
     bearerToken: normalizeString(overrides.bearerToken || merged.INKWELL_API_BEARER_TOKEN, { max: 8192 }),
     backendJwtSecret: normalizeString(overrides.backendJwtSecret || merged.BACKEND_JWT_SECRET, { max: 2048 }),
     jwtIssuer: normalizeString(overrides.jwtIssuer || merged.JWT_ISSUER, { max: 120 }) || DEFAULT_JWT_ISSUER,
     runtimeRoomAudience: DEFAULT_RUNTIME_ROOM_AUDIENCE,
     identity: Object.freeze({
-      userId: normalizeString(overrides.userId || merged.INKWELL_AI_DEV_USER_ID, { max: 120 }) || 'ai-dev-user',
-      username: normalizeString(overrides.username || merged.INKWELL_AI_DEV_USERNAME, { max: 120 }) || 'inkwell',
+      userId: normalizeString(overrides.userId || merged.INKWELL_AI_DEV_USER_ID, { max: 120 }) || DEFAULT_AI_DEV_USER_ID,
+      username: normalizeString(overrides.username || merged.INKWELL_AI_DEV_USERNAME, { max: 120 }) || DEFAULT_AI_DEV_USERNAME,
       email: normalizeString(overrides.email || merged.INKWELL_AI_DEV_EMAIL, { max: 320 }) || 'ai-dev@localhost',
       role: normalizeRole(overrides.role || merged.INKWELL_AI_DEV_ROLE),
     }),
